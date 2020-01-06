@@ -17,10 +17,10 @@ from eval.evaluator import Evaluator
 
 
 class Yolo_test(Evaluator):
-    def __init__(self, test_weight):
+    def __init__(self):
         log_dir = os.path.join(cfg.LOG_DIR, 'test')
         moving_ave_decay = cfg.MOVING_AVE_DECAY
-        test_weight_path = os.path.join(cfg.WEIGHTS_DIR, test_weight)
+        test_weight_path = cfg.WEIGHT_FILE_TEST
 
         with tf.name_scope('input'):
             input_data = tf.placeholder(dtype=tf.float32, name='input_data')
@@ -35,8 +35,7 @@ class Yolo_test(Evaluator):
         saver = tf.train.Saver(ema_obj.variables_to_restore())
         # 参考链接
         # https://blog.csdn.net/yushensyc/article/details/79638115
-        #saver.restore(self.__sess, test_weight_path)
-        saver.restore(self.__sess, './weights/yolo.ckpt-98-0.7907')
+        saver.restore(self.__sess, test_weight_path)
         super(Yolo_test, self).__init__(self.__sess, input_data, training, pred_sbbox, pred_mbbox, pred_lbbox)
 
     def detect_image(self, image):
@@ -68,7 +67,7 @@ class Yolo_test(Evaluator):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Test model')
-    parser.add_argument('--test_weight', help='name of test weights file', default='', type=str)
+    # parser.add_argument('--test_weight', help='name of test weights file', default='', type=str)
     parser.add_argument('--gpu', help='select a gpu for test', default='0', type=str)
     parser.add_argument('-mt', help='multi scale test', dest='mt', action='store_true', default=False)
     parser.add_argument('-ft', help='flip test', dest='ft', action='store_true', default=False)
@@ -78,7 +77,8 @@ if __name__ == '__main__':
 
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     
-    T = Yolo_test(args.test_weight)
+    # T = Yolo_test(args.test_weight)
+    T = Yolo_test()
     if args.t07:
         T.test(2007, args.mt, args.ft)
     elif args.t12:

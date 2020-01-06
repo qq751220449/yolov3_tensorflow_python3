@@ -78,4 +78,5 @@ def darknet53(input_data, training):   # darknet主要是特征提取网络
             darknet_route2 = residual_block(name='residual3', input_data=conv, input_channel=1024,
                                             filter_num1=512, filter_num2=1024, training=training)
         return darknet_route0, darknet_route1, darknet_route2
-    # 总共进行了5次降采样,最终416/32=13
+    # 总共进行了5次降采样,最终416/32=13   darknet_route0  416/8=52   darknet_route1 416/16=26
+    # darknet_route2   416/32=13

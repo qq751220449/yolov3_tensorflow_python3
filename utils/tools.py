@@ -233,18 +233,19 @@ def img_preprocess2(image, bboxes, target_shape, correct_box=True):
     h_org, w_org, _ = image.shape
 
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+    # print(image)
 
     resize_ratio = min(1.0 * w_target / w_org, 1.0 * h_target / h_org)
     # 分母越大,结果越小,就是找到最大的那个缩放尺度,这样来保证宽高比不变
     resize_w = int(resize_ratio * w_org)
     resize_h = int(resize_ratio * h_org)
-    image_resized = cv2.resize(image, (resize_w, resize_h))
+    image_resized = cv2.resize(image, (resize_w, resize_h))   # 保持纵横比不变的情况下进行缩放
 
     image_paded = np.full((h_target, w_target, 3), 128.0)
     dw = int((w_target - resize_w) / 2)
     dh = int((h_target - resize_h) / 2)
     image_paded[dh:resize_h+dh, dw:resize_w+dw,:] = image_resized # 填充图片
-    image = image_paded / 255.0    # 归一化
+    image = image_paded / 255.0    # 归一化至[0,1]之间
 
     if correct_box:
         bboxes[:, [0, 2]] = bboxes[:, [0, 2]] * resize_ratio + dw

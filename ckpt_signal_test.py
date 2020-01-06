@@ -5,6 +5,7 @@ import config as cfg
 import cv2
 import os
 import tensorflow as tf
+from model.head.yolov3 import YOLOV3
 from utils import tools
 
 _train_input_sizes = cfg.TRAIN_INPUT_SIZES
@@ -18,7 +19,7 @@ _dataset_path = cfg.DATASET_PATH
 _project_path = cfg.PROJECT_PATH
 moving_ave_decay = cfg.MOVING_AVE_DECAY
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"  # 默认使用GPU0进行预测
-PB_FILE_PATH = cfg.CKPT2PB_PB_NAME
+test_weight = cfg.WEIGHT_FILE_TEST
 
 
 
@@ -106,8 +107,6 @@ def get_bbox(image, sess , input_data, training, pred_sbbox, pred_mbbox, pred_lb
     :param image: 要预测的图片
     :return: 返回NMS后的bboxes，存储格式为(xmin, ymin, xmax, ymax, score, class)
     """
-    h, w, c = image.shape
-    # print(image.shape)
     if multi_test:
         test_input_sizes = _train_input_sizes[::3]  # 这里应该是选择[320,416,512,608]
         bboxes_list = []
@@ -125,20 +124,20 @@ def get_bbox(image, sess , input_data, training, pred_sbbox, pred_mbbox, pred_lb
         bboxes = __predict(image, _test_input_size, (0, np.inf), sess , input_data, training,
                            pred_sbbox, pred_mbbox, pred_lbbox)
     bboxes = tools.nms(bboxes, _score_threshold, _iou_threshold, method='nms')
-    trash = []
-    count = np.array(bboxes).shape[0]
-    for i in range(count):
-        current_detection = {"name":_classes[int(bboxes[i][5])],
-                             "score":float(bboxes[i][4]),
-                             # "position":bboxes[i][0:4].tolist()
-                             "position":[bboxes[i][1]/h, bboxes[i][0]/w, bboxes[i][3]/h, bboxes[i][2]/w]
-                            }
-        trash.append(current_detection)
-    response ={
-        "trash_num":count,
-        "trash":trash
-    }
-    return bboxes,response
+    return bboxes
+
+
+with tf.name_scope('input'):
+    input_data = tf.placeholder(dtype=tf.float32, name='input_data')
+    training = tf.placeholder(dtype=tf.bool, name='training')
+_, _, _, pred_sbbox, pred_mbbox, pred_lbbox = YOLOV3(training).build_nework(input_data)
+ema_obj = tf.train.ExponentialMovingAverage(moving_ave_decay)
+sess = tf.Session()
+saver = tf.train.Saver(ema_obj.variables_to_restore())
+# 参考链接
+# https://blog.csdn.net/yushensyc/article/details/79638115
+# saver.restore(self.__sess, test_weight_path)
+saver.restore(sess, test_weight)
 
 test_set_path = os.path.join(cfg.DATASET_PATH, 'VOC2007')  # '%d_test' % 2007)
 img_inds_file = os.path.join(test_set_path, 'ImageSets', 'Main', 'test.txt')
@@ -151,45 +150,7 @@ image_ind = image_inds[0]
 image_path = os.path.join(test_set_path, 'JPEGImages', image_ind + '.jpg')
 image = cv2.imread(image_path)
 original_image = np.copy(image)
-
-
-with tf.Graph().as_default():
-    output_graph_def = tf.GraphDef()
-    with open(PB_FILE_PATH, "rb") as f:
-        output_graph_def.ParseFromString(f.read())
-        for node in output_graph_def.node:
-            if node.op == 'RefSwitch':
-                node.op = 'Switch'
-                for index in range(len(node.input)):
-                    if 'moving_' in node.input[index]:
-                        node.input[index] = node.input[index] + '/read'
-            elif node.op == 'AssignSub':
-                node.op = 'Sub'
-                if 'use_locking' in node.attr: del node.attr['use_locking']
-            elif node.op == 'AssignAdd':
-                node.op = 'Add'
-                if 'use_locking' in node.attr: del node.attr['use_locking']
-            elif node.op == 'Assign':
-                node.op = 'Identity'
-                if 'use_locking' in node.attr: del node.attr['use_locking']
-                if 'validate_shape' in node.attr: del node.attr['validate_shape']
-                if len(node.input) == 2:
-                    # input0: ref: Should be from a Variable node. May be uninitialized.
-                    # input1: value: The value to be assigned to the variable.
-                    node.input[0] = node.input[1]
-                    del node.input[1]
-        tf.import_graph_def(output_graph_def, name="")
-    with tf.Session() as sess:
-        # sess.run(tf.global_variables_initializer())
-        input_image_tensor = sess.graph.get_tensor_by_name("input/input_data:0")
-        input_is_training_tensor = sess.graph.get_tensor_by_name("input/training:0")
-
-        output_node_sbbox_tensor_name = sess.graph.get_tensor_by_name("yolov3/pred_sbbox/concat_2:0")
-        output_node_mbbox_tensor_name = sess.graph.get_tensor_by_name("yolov3/pred_mbbox/concat_2:0")
-        output_node_lbbox_tensor_name = sess.graph.get_tensor_by_name("yolov3/pred_lbbox/concat_2:0")
-
-        bboxes, response = get_bbox(image, sess, input_image_tensor, input_is_training_tensor, output_node_sbbox_tensor_name,
-                          output_node_mbbox_tensor_name, output_node_lbbox_tensor_name, False, False)
-        print(response)
-        image = tools.draw_bbox(original_image, bboxes, _classes)
-        cv2.imwrite('detect_result.jpg', image)
+bboxes = get_bbox(image, sess, input_data, training, pred_sbbox, pred_mbbox, pred_lbbox, False, False)
+print(bboxes)
+image = tools.draw_bbox(original_image, bboxes, _classes)
+cv2.imwrite('detect_result.jpg', image)

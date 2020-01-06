@@ -4,7 +4,9 @@ import sys
 import os
 sys.path.append(os.path.abspath('..'))
 current_dir = os.path.abspath(os.path.dirname(__file__))
+print(current_dir)
 sys.path.append(current_dir)
+sys.path.append('/home/ice2019/yolov3_temsorflow')
 sys.path.append("..")
 import cv2
 import random
@@ -27,24 +29,24 @@ class Data(object):
         small_detector对应下标索引0， medium_detector对应下标索引1，big_detector对应下标索引2
         :param dataset_type: 选择加载训练样本或测试样本，必须是'train' or 'test'
         """
-        self.__annot_dir_path = cfg.ANNOT_DIR_PATH
-        self.__train_input_sizes = cfg.TRAIN_INPUT_SIZES  # 训练输入图像的大小,是一个列表
-        self.__strides = np.array(cfg.STRIDES)   # 多个尺度
-        self.__batch_size = cfg.BATCH_SIZE   # 训练Batchsize
-        self.__classes = cfg.CLASSES    # 预测类别
-        self.__num_classes = len(self.__classes)  # 类别数
-        self.__gt_per_grid = int(cfg.GT_PER_GRID)  # 每个栅格预测3个Bbox框
+        self.__annot_dir_path = cfg.ANNOT_DIR_PATH              # 转换后的ANNOT文件存放位置
+        self.__train_input_sizes = cfg.TRAIN_INPUT_SIZES        # 训练输入图像的大小,是一个列表
+        self.__strides = np.array(cfg.STRIDES)                  # 多个尺度
+        self.__batch_size = cfg.BATCH_SIZE                      # 训练Batchsize
+        self.__classes = cfg.CLASSES                            # 预测类别
+        self.__num_classes = len(self.__classes)                # 类别数
+        self.__gt_per_grid = int(cfg.GT_PER_GRID)               # 每个栅格预测3个Bbox框
         self.__class_to_ind = dict(zip(self.__classes, range(self.__num_classes)))  # 生成类别的索引
 
         annotations = self.__load_annotations(dataset_type)
-        num_annotations = len(annotations)    # 待训练的数据集多大
-        self.__annotations = annotations[: int(split_ratio * num_annotations)]
+        num_annotations = len(annotations)                      # 待训练的数据集多大---去除没有目标的图片
+        self.__annotations = annotations[: int(split_ratio * num_annotations)]  # 训练全部的train样本
         self.__num_samples = len(self.__annotations)
-        logging.info(('The number of image for %s is:' % dataset_type).ljust(50) + str(self.__num_samples))
+        logging.info(('\t' + 'The number of image for %s is:' % dataset_type).ljust(50) + str(self.__num_samples))
         # self.__num_batchs = int(np.ceil(self.__num_samples / self.__batch_size))
-        self.__num_batchs = (np.ceil(self.__num_samples / self.__batch_size)).astype(np.int32)
+        self.__num_batchs = (np.ceil(self.__num_samples / self.__batch_size)).astype(np.int32)   # 计算有多少个Batch
         # 有多少个batch
-        self.__batch_count = 0
+        self.__batch_count = 0    # batch计数
 
     def batch_size_change(self, batch_size_new):
         self.__batch_size = batch_size_new
@@ -62,8 +64,9 @@ class Data(object):
         annotation_path = os.path.join(self.__annot_dir_path, dataset_type + '_annotation.txt')
         with open(annotation_path, 'r') as f:
             txt = f.readlines()
+            # 将图片有对应标注的样本加入训练
             annotations = [line.strip() for line in txt if len(line.strip().split()[1:]) != 0]
-        np.random.shuffle(annotations)
+        np.random.shuffle(annotations)   # 列表随机排序
         return annotations   # 将文件内容读取到一个列表中
 
     def __iter__(self):
@@ -71,19 +74,23 @@ class Data(object):
 
     def __next__(self):
         """
-        使得pascal_voc对象变为可迭代对象
+        使得pascal_voc对象变为可迭代对象,便于可以使用for...in...  Data类定义的均是私有变量,无法直接使用
         :return: 每次迭代返回一个batch的图片、标签
-        batch_image: shape为(batch_size, input_size, input_size, 3)
+        batch_image: shape为(batch_size, input_size, input_size, 3)  已经做了数据增强
         batch_label_sbbox: shape为(batch_size, input_size / 8, input_size / 8, 6 + num_classes)
         batch_label_mbbox: shape为(batch_size, input_size / 16, input_size / 16, 6 + num_classes)
         batch_label_lbbox: shape为(batch_size, input_size / 32, input_size / 32, 6 + num_classes)
+        如果对应的GT落在某个Grid中,对应的6+num_classes就会改变   而且各个不同尺度是根据GT标签设置的
+        假设有一张图片,只有一个GT-Box在中间,而且值很大,那么就会在batch_label_lbbox矩阵中填满对应的数值6 + num_classes
         batch_sbboxes: shape为(batch_size, max_bbox_per_scale, 4)
         batch_mbboxes: shape为(batch_size, max_bbox_per_scale, 4)
         batch_lbboxes: shape为(batch_size, max_bbox_per_scale, 4)
+        针对每张图片的各个不同尺度,batch_lbboxes会包含一个(xmin,ymin,xmax,ymax)其他都是0,
+        而且max_bbox_per_scale最小为2
         """
         with tf.device('/cpu:0'):
-            self.__train_input_size = random.choice(self.__train_input_sizes)
-            self.__train_output_sizes = (self.__train_input_size // self.__strides)
+            self.__train_input_size = random.choice(self.__train_input_sizes)           # 随机选取一个训练尺度
+            self.__train_output_sizes = (self.__train_input_size // self.__strides)     # 多个尺度
 
             batch_image = np.zeros((self.__batch_size, self.__train_input_size, self.__train_input_size, 3))
             batch_label_sbbox = np.zeros([self.__batch_size, self.__train_output_sizes[0], self.__train_output_sizes[0],
@@ -99,32 +106,36 @@ class Data(object):
             max_mbbox_per_img = 0
             max_lbbox_per_img = 0
             num = 0
-            if self.__batch_count < self.__num_batchs:
+            if self.__batch_count < self.__num_batchs:     # batch已经计算完一个epoch,置0重新开始计算
                 while num < self.__batch_size:
-                    index = self.__batch_count * self.__batch_size + num
-                    if index >= self.__num_samples:
+                    index = self.__batch_count * self.__batch_size + num   # 图片索引
+                    if index >= self.__num_samples:     # 索引超过样本数量,从0位置开始索引
                         index -= self.__num_samples
                     annotation = self.__annotations[index]
                     image_org, bboxes_org = self.__parse_annotation(annotation)
 
-                    # mixup
+                    # mixup  图片融合
                     if random.random() < 0.5:
                         index_mix = random.randint(0, self.__num_samples - 1)
                         annotation_mix = self.__annotations[index_mix]
                         image_mix, bboxes_mix = self.__parse_annotation(annotation_mix)
 
                         lam = np.random.beta(1.5, 1.5)
-                        image = lam * image_org + (1 - lam) * image_mix
+                        # print(lam)
+                        image = lam * image_org + (1 - lam) * image_mix   # 图像融合
+                        # print(bboxes_org)
+                        # print(len(bboxes_org))
                         bboxes_org = np.concatenate(
-                            [bboxes_org, np.full((len(bboxes_org), 1), lam)], axis=-1)
+                            [bboxes_org, np.full((len(bboxes_org), 1), lam)], axis=-1)  # 多了一列,存放融合的权重值
                         bboxes_mix = np.concatenate(
                             [bboxes_mix, np.full((len(bboxes_mix), 1), 1 - lam)], axis=-1)
-                        bboxes = np.concatenate([bboxes_org, bboxes_mix])
+                        bboxes = np.concatenate([bboxes_org, bboxes_mix])   # 在第一维度拼接
                     else:
                         image = image_org
-                        bboxes = np.concatenate([bboxes_org, np.full((len(bboxes_org), 1), 1.0)], axis=-1)
+                        bboxes = np.concatenate([bboxes_org, np.full((len(bboxes_org), 1), 1.0)], axis=-1)  # 扩展一列,存放权重
 
                     label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = self.__create_label(bboxes)
+                    # print(len(sbboxes) + len(mbboxes) + len(lbboxes))  # 输出一张图中一共有多少BBox
 
                     batch_image[num, :, :, :] = image
                     batch_label_sbbox[num, :, :, :, :] = label_sbbox
@@ -132,12 +143,13 @@ class Data(object):
                     batch_label_lbbox[num, :, :, :, :] = label_lbbox
 
                     zeros = np.zeros((1, 4), dtype=np.float32)
-                    sbboxes = sbboxes if len(sbboxes) != 0 else zeros
-                    mbboxes = mbboxes if len(mbboxes) != 0 else zeros
+                    sbboxes = sbboxes if len(sbboxes) != 0 else zeros   # 如果什么都没有,创建一个全0矩阵
+                    mbboxes = mbboxes if len(mbboxes) != 0 else zeros   # 原本存放每个尺度对应的BBox的值
                     lbboxes = lbboxes if len(lbboxes) != 0 else zeros
                     temp_batch_sbboxes.append(sbboxes)
                     temp_batch_mbboxes.append(mbboxes)
                     temp_batch_lbboxes.append(lbboxes)
+
                     max_sbbox_per_img = max(max_sbbox_per_img, len(sbboxes))
                     max_mbbox_per_img = max(max_mbbox_per_img, len(mbboxes))
                     max_lbbox_per_img = max(max_lbbox_per_img, len(lbboxes))
@@ -153,7 +165,7 @@ class Data(object):
                        batch_sbboxes, batch_mbboxes, batch_lbboxes
             else:
                 self.__batch_count = 0
-                np.random.shuffle(self.__annotations)
+                np.random.shuffle(self.__annotations)   # 打乱训练数据
                 raise StopIteration
 
     def __parse_annotation(self, annotation):
@@ -170,13 +182,15 @@ class Data(object):
         image_path = line[0]
         image = np.array(cv2.imread(image_path))
         # print(image)
+        # print(image.shape)    # 960,1280,3
         bboxes = np.array([list(map(int, box.split(','))) for box in line[1:]])
         # print(bboxes)
-        image, bboxes = dataAug.random_horizontal_flip(np.copy(image), np.copy(bboxes))
-        image, bboxes = dataAug.random_crop(np.copy(image), np.copy(bboxes))
+        # print(bboxes.shape)
+        image, bboxes = dataAug.random_horizontal_flip(np.copy(image), np.copy(bboxes))     # 随机水平翻转
+        image, bboxes = dataAug.random_crop(np.copy(image), np.copy(bboxes))                # 图片随机裁切
         image, bboxes = dataAug.random_translate(np.copy(image), np.copy(bboxes))
         image, bboxes = tools.img_preprocess2(np.copy(image), np.copy(bboxes),
-                                              (self.__train_input_size, self.__train_input_size), True)
+                                              (self.__train_input_size, self.__train_input_size), True)  # 缩放图片到原始尺寸
         return image, bboxes
 
     def __create_label(self, bboxes):
@@ -190,7 +204,8 @@ class Data(object):
         只要某个GT落入grid中，那么这个grid就负责预测它，最多负责预测gt_per_grid个GT，
         那么该grid中对应位置的数据为(xmin, ymin, xmax, ymax, 1, classes, mixup_weights),
         其他grid对应位置的数据都为(0, 0, 0, 0, 0, 0..., 1)
-        sbboxes：shape为(max_bbox_per_scale, 4)
+        一个BBox框只会产生一个预测标签,先根据GT-Box的面积来区分由哪个尺度特征来预测
+        sbboxes：shape为(max_bbox_per_scale, 4)  对应的每个尺度总共多少个BBox,且存放原始BBox的大小
         mbboxes：shape为(max_bbox_per_scale, 4)
         lbboxes：shape为(max_bbox_per_scale, 4)
         存储的坐标为(xmin, ymin, xmax, ymax)，大小都是bbox纠正后的原始大小
@@ -204,22 +219,22 @@ class Data(object):
         bboxes_count = [np.zeros((self.__train_output_sizes[i], self.__train_output_sizes[i])) for i in range(3)]
 
         for bbox in bboxes:
-            # (1)获取bbox在原图上的顶点坐标、类别索引、mix up权重、中心坐标、高宽、尺度
-            bbox_coor = bbox[:4]
-            bbox_class_ind = int(bbox[4])
-            bbox_mixw = bbox[5]
+            # 获取bbox在原图上的顶点坐标、类别索引、mix up权重、中心坐标、高宽、尺度
+            bbox_coor = bbox[:4]                # 位置
+            bbox_class_ind = int(bbox[4])       # 类别
+            bbox_mixw = bbox[5]                 # 混合权重
             bbox_xywh = np.concatenate([(bbox_coor[2:] + bbox_coor[:2]) * 0.5,
-                                        bbox_coor[2:] - bbox_coor[:2]], axis=-1)
-            bbox_scale = np.sqrt(np.multiply.reduce(bbox_xywh[2:]))
+                                        bbox_coor[2:] - bbox_coor[:2]], axis=-1)   # 将xmin等转换为x,y,w,h(中心坐标)
+            bbox_scale = np.sqrt(np.multiply.reduce(bbox_xywh[2:]))  # 面积再开根号
 
             # label smooth
             onehot = np.zeros(self.__num_classes, dtype=np.float)
-            onehot[bbox_class_ind] = 1.0
+            onehot[bbox_class_ind] = 1.0    # 对应位设置为1
             uniform_distribution = np.full(self.__num_classes, 1.0 / self.__num_classes)
             deta = 0.01
-            smooth_onehot = onehot * (1 - deta) + deta * uniform_distribution
+            smooth_onehot = onehot * (1 - deta) + deta * uniform_distribution  # 对应类别设置one-hot编码
 
-            if bbox_scale <= 30:
+            if bbox_scale <= 30:    # 如果原图中的尺寸小,那么就在大的特征图中进行预测
                 match_branch = 0
             elif (30 < bbox_scale) and (bbox_scale <= 90):
                 match_branch = 1
@@ -227,7 +242,7 @@ class Data(object):
                 match_branch = 2
 
             xind, yind = np.floor(1.0 * bbox_xywh[:2] / self.__strides[match_branch]).astype(np.int32)
-            gt_count = int(bboxes_count[match_branch][yind, xind])
+            gt_count = int(bboxes_count[match_branch][yind, xind])  # 当前栅格以及预测了多少个目标
             if gt_count < self.__gt_per_grid:
                 if gt_count == 0:
                     gt_count = slice(None)

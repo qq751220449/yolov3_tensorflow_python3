@@ -30,6 +30,7 @@ def batch_normalization(input_data, input_channel, training, decay=0.9):
                 return tf.identity(batch_mean), tf.identity(batch_var)
 
         mean, variance = tf.cond(training, mean_and_var_update, lambda: (moving_mean, moving_var))
+        # 不训练的时候,直接将滑动平均的值输出
         return tf.nn.batch_normalization(input_data, mean, variance, shift, scale, 1e-05)
     # x是输入样本 mean是样本均值 variance是样本方差 shift是样本便宜 scale是缩放 最后一个参数是防止分母为0,添加的一个极小值
     # 具体计算公式如下所示    y=scale*(x-mean)/variance+shift
@@ -173,13 +174,13 @@ def decode(name, conv_output, num_classes, stride):
         conv_shape = tf.shape(conv_output)
         batch_size = conv_shape[0]
         output_size = conv_shape[1]
-        gt_per_grid = tf.cast((conv_shape[3] / (5 + num_classes)), tf.int32)
+        gt_per_grid = tf.cast((conv_shape[3] / (5 + num_classes)), tf.int32)  # 计算每个GRID预测多少个BBox
 
         conv_output = tf.reshape(conv_output, [batch_size, output_size, output_size, gt_per_grid, 5 + num_classes])
         conv_raw_dx1dy1 = conv_output[:, :, :, :, 0:2]
         conv_raw_dx2dy2 = conv_output[:, :, :, :, 2:4]
-        conv_raw_conf = conv_output[:, :, :, :, 4:5]
-        conv_raw_prob = conv_output[:, :, :, :, 5:]
+        conv_raw_conf = conv_output[:, :, :, :, 4:5]    # 包含物体的置信度
+        conv_raw_prob = conv_output[:, :, :, :, 5:]     # 在包含物体的前提下,每个类别的可能性
 
         # 获取yolo的输出feature map中每个grid左上角的坐标
         # 需注意的是图像的坐标轴方向为
@@ -189,6 +190,7 @@ def decode(name, conv_output, num_classes, stride):
         # ↓
         # y
         # 在图像中标注坐标时通常用(y,x)，但此处为了与coor的存储格式(dx, dy, dw, dh)保持一致，将grid的坐标存储为(x, y)的形式
+        # tf.newaxis主要是扩展维度 维度有(13,)变成了(13,1)
 
         y = tf.tile(tf.range(output_size, dtype=tf.int32)[:, tf.newaxis], [1, output_size])
         """
@@ -219,10 +221,10 @@ def decode(name, conv_output, num_classes, stride):
         # xmax, ymax = ((x_grid, y_grid) + 0.5 + (dx_max, dy_max)) * stride
         pred_xymin = (xy_grid + 0.5 - tf.exp(conv_raw_dx1dy1)) * stride
         pred_xymax = (xy_grid + 0.5 + tf.exp(conv_raw_dx2dy2)) * stride
-        pred_corner = tf.concat([pred_xymin, pred_xymax], axis=-1)
+        pred_corner = tf.concat([pred_xymin, pred_xymax], axis=-1)   # 还原到原始图尺度上的xmin,ymin,xmax,ymax
 
         # (2)对confidence进行decode
-        pred_conf = tf.sigmoid(conv_raw_conf)
+        pred_conf = tf.sigmoid(conv_raw_conf)   # sigmoid激活函数
 
         # (3)对probability进行decode
         pred_prob = tf.sigmoid(conv_raw_prob)

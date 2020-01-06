@@ -25,12 +25,32 @@ test score threshold: 0.01<br>
 ## Usage
 1. clone YOLO_v3 repository
     ``` bash
-    git clone https://github.com/qq751220449/yolov3_tensorflow_python3.git
+    git clone https://github.com/qq751220449/yolov3_tensorflow.git
     ```
 2. prepare data<br>
-    (1) prepare datasets<br>
+    (1) create your datasets<br>
+    Create a new folder named `data` in the directory where the `yolov3_tensorflow` folder 
+    is located, and then create a new folder named `VOC2007` in the `data/`.<br>
+    Then put datasets into `data/VOC2007`.
+    
+    The file structure is as follows:<br>
+    |--yolov3_tensorflow<br>
+    |--|--v1<br>
+    |--|--v2<br>
+    |--|--v3<br>
+    |--data<br>
+    |--|--VOC2007<br>
+    |--|--|--Annotations<br>
+    |--|--|--ImageSets<br>
+    |--|--|--|--Main<br>
+    |--|--|--JPEGImages<br>
+    (2) convert data format<br>
+    You should alter `DATASET_PATH` and `PROJECT_PATH`in `config.py`, for example:<br>
+    `DATASET_PATH = /home/ice2019/yolov3_temsorflow/data`<br>
+    `PROJECT_PATH = /home/ice2019/yolov3_temsorflow`<br>
+    and then<br>
     ```bash
-    cd utils
+    cd yolov3_tensorflow/utils
     python voc.py
     ```
 3. prepare initial weights<br>
@@ -46,12 +66,20 @@ test score threshold: 0.01<br>
     nohup python train.py &
     ```
 5. test<br>
-    Download weight file [stronger-yolo-v2-test.ckpt](https://drive.google.com/drive/folders/1HOwQ7RBefHrPDzYY3rlOWW1qiJ_7X7xz)<br>
     **If you want to get a higher mAP, you can set the score threshold to 0.01、use multi scale test、flip test.<br>
     If you want to use it in actual projects, or if you want speed, you can set the score threshold to 0.2.<br>**
     ``` bash
-    nohup python test.py --gpu=0 --test_weight=model_path.ckpt -t07 &
+    nohup python test.py --gpu=0 -t07 &
     ```
+6. continue train<br>
+    You should alter `Continue_To_Train` and `CHECKPOINT_FILE`in `config.py`, for example:<br>
+    `Continue_To_Train = True`<br>
+    `CHECKPOINT_FILE = 'checkpoint/yolo.ckpt-99-0.7929'`<br>
+    
+7. convert checkpoint to pb file<br>
+    You should alter `CKPT2PB_CKPT_FILE` and `CKPT2PB_PB_NAME`in `config.py`, for example:<br>
+    `CKPT2PB_CKPT_FILE = 'checkpoint/yolo.ckpt-99-0.7929'`<br>
+    `CKPT2PB_PB_NAME = 'frozen_model_20200103_99_7929.pb'`<br>
      
 ## Reference:<br>
 paper: <br>
@@ -68,10 +96,10 @@ paper: <br>
  
 ## Requirements
 software
-- Python3 <br>
+- Python3.6.5 <br>
 - Numpy1.14.5<br>
-- Tensorflow.1.12.0 <br>
+- Tensorflow.1.10.0 <br>
 - Opencv3.4.1 <br>
 
 hardware
-- 16G 1080Ti
+- 8G 1080

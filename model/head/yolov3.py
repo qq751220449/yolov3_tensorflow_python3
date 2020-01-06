@@ -12,11 +12,11 @@ from utils import tools
 
 class YOLOV3(object):
     def __init__(self, training):
-        self.__training = training  # 传递来的参数,用于表示是否是训练过程
-        self.__classes = cfg.CLASSES   # 类别列表
-        self.__num_classes = len(cfg.CLASSES)  # 类别数
-        self.__strides = np.array(cfg.STRIDES)   # 多尺度
-        self.__gt_per_grid = cfg.GT_PER_GRID     # 这个应该是特征图上每个像素预测多少个BBox框
+        self.__training = training                      # 传递来的参数,用于表示是否是训练过程
+        self.__classes = cfg.CLASSES                    # 类别列表
+        self.__num_classes = len(cfg.CLASSES)           # 类别数
+        self.__strides = np.array(cfg.STRIDES)          # 多尺度
+        self.__gt_per_grid = cfg.GT_PER_GRID            # 这个应该是特征图上每个网格预测多少个BBox框
         self.__iou_loss_thresh = cfg.IOU_LOSS_THRESH    # IOU损失阈值
 
     def build_nework(self, input_data, val_reuse=False):
@@ -34,6 +34,7 @@ class YOLOV3(object):
         """
         with tf.variable_scope('yolov3', reuse=val_reuse):
             darknet_route0, darknet_route1, darknet_route2 = darknet53(input_data, self.__training)
+            # 输出三种不同尺度的特征图 darknet_route0=input_size/8 darknet_route1=input_size/16 darknet_route2=input_size/32
 
             conv = convolutional(name='conv0', input_data=darknet_route2, filters_shape=(1, 1, 1024, 512),
                                  training=self.__training)
@@ -112,7 +113,8 @@ class YOLOV3(object):
             pred_sbbox = decode(name='pred_sbbox', conv_output=conv_sbbox,
                                 num_classes=self.__num_classes, stride=self.__strides[0])    # 使用了8倍降采样
             # ----------**********---------- Detection branch of small object ----------**********----------
-        print(pred_sbbox,pred_mbbox,pred_lbbox)
+        # print("yolov3_final_output")
+        # print(pred_sbbox,pred_mbbox,pred_lbbox)
         return conv_sbbox, conv_mbbox, conv_lbbox, pred_sbbox, pred_mbbox, pred_lbbox
 
     def __focal(self, target, actual, alpha=1, gamma=2):
@@ -143,16 +145,16 @@ class YOLOV3(object):
             input_size = stride * output_size
             conv = tf.reshape(conv, (batch_size, output_size, output_size,
                                      self.__gt_per_grid, 5 + self.__num_classes))
-            conv_raw_conf = conv[..., 4:5]
+            conv_raw_conf = conv[..., 4:5]      # 预测出来的神经网络的原始输出
             conv_raw_prob = conv[..., 5:]
 
-            pred_coor = pred[..., 0:4]
-            pred_conf = pred[..., 4:5]
+            pred_coor = pred[..., 0:4]          # 预测出来的BBox (x,y,h,w)
+            pred_conf = pred[..., 4:5]          # 预测出来包含物体的置信度
 
-            label_coor = label[..., 0:4]
-            respond_bbox = label[..., 4:5]
-            label_prob = label[..., 5:-1]
-            label_mixw = label[..., -1:]
+            label_coor = label[..., 0:4]        # 真实的BBox框的(xmin, ymin, xmax, ymax)
+            respond_bbox = label[..., 4:5]      # 真实的包含物体的置信度 1
+            label_prob = label[..., 5:-1]       # classes的可能性
+            label_mixw = label[..., -1:]        # mixup
 
             # 计算GIOU损失
             GIOU = tools.GIOU(pred_coor, label_coor)
@@ -193,9 +195,11 @@ class YOLOV3(object):
         :param conv_sbbox: shape为(batch_size, image_size / 8, image_size / 8, anchors_per_scale * (5 + num_classes))
         :param conv_mbbox: shape为(batch_size, image_size / 16, image_size / 16, anchors_per_scale * (5 + num_classes))
         :param conv_lbbox: shape为(batch_size, image_size / 32, image_size / 32, anchors_per_scale * (5 + num_classes))
+        conv_?是YOLO的原始卷积输出(raw_dx, raw_dy, raw_dw, raw_dh, raw_conf, raw_prob)
         :param pred_sbbox: shape为(batch_size, image_size / 8, image_size / 8, anchors_per_scale, (5 + num_classes))
         :param pred_mbbox: shape为(batch_size, image_size / 16, image_size / 16, anchors_per_scale, (5 + num_classes))
         :param pred_lbbox: shape为(batch_size, image_size / 32, image_size / 32, anchors_per_scale, (5 + num_classes))
+        pred_?是YOLO预测bbox的信息(x, y, w, h, conf, prob)，(x, y, w, h)的大小是相对于input_size的
         :param label_sbbox: shape为(batch_size, input_size / 8, input_size / 8, anchor_per_scale, 6 + num_classes)
         :param label_mbbox: shape为(batch_size, input_size / 16, input_size / 16, anchor_per_scale, 6 + num_classes)
         :param label_lbbox: shape为(batch_size, input_size / 32, input_size / 32, anchor_per_scale, 6 + num_classes)

@@ -12,34 +12,47 @@ import argparse
 from eval.evaluator import Evaluator
 
 
-class Yolo_train(Evaluator):
+class Yolo_train(Evaluator):                                    # 继承于Evaluator类
     def __init__(self):
-        self.__learn_rate_init = cfg.LEARN_RATE_INIT   # 初始化Learing Rate的值
-        self.__learn_rate_end = cfg.LEARN_RATE_END     # 学习率最终值
-        self.__max_periods = cfg.MAX_PERIODS           # 最大迭代次数,就是epcho
+        self.__learn_rate_init = cfg.LEARN_RATE_INIT            # 初始化Learing Rate的值
+        self.__learn_rate_end = cfg.LEARN_RATE_END              # 学习率最终值
+        self.__max_periods = cfg.MAX_PERIODS                    # 最大迭代次数,就是epoch
         self.__warmup_periods = cfg.WARMUP_PERIODS
-        self.__weights_dir = cfg.WEIGHTS_DIR
-        self.__weights_init = cfg.WEIGHTS_INIT         # darknet53初始化权重文件
+        self.__weights_dir = cfg.WEIGHTS_DIR                    # 权重文件保存目录
+        self.__weights_init = cfg.WEIGHTS_INIT                  # darknet53初始化权重文件
         self.__time = time.strftime('%Y-%m-%d-%H-%M-%S',time.localtime(time.time()))
-        self.__log_dir = os.path.join(cfg.LOG_DIR, 'train', self.__time)
-        self.__moving_ave_decay = cfg.MOVING_AVE_DECAY
-        self.__train_data = Data('train')    # 构建数据对象
-        self.__steps_per_period = len(self.__train_data) # 一个epcho训练多少步
+        self.__log_dir = os.path.join(cfg.LOG_DIR, 'train', self.__time)   # 训练日志存放目录
+        self.__moving_ave_decay = cfg.MOVING_AVE_DECAY          # 滑动平均变量
+        self.__train_data = Data('train')                       # 构建Data对象---传递参数“train”
+        self.__steps_per_period = len(self.__train_data)        # 一个epcho训练多少个Batch
+        self.__continus_to_train = cfg.Continue_To_Train        # 是否继续训练
+        self.__checkpoint_file = cfg.CHECKPOINT_FILE
 
         with tf.name_scope('input'):
             self.__input_data = tf.placeholder(dtype=tf.float32, name='input_data')
+            # print(self.__input_data)
             self.__label_sbbox = tf.placeholder(dtype=tf.float32, name='label_sbbox')
+            # print(self.__label_sbbox)
             self.__label_mbbox = tf.placeholder(dtype=tf.float32, name='label_mbbox')
+            # print(self.__label_mbbox)
             self.__label_lbbox = tf.placeholder(dtype=tf.float32, name='label_lbbox')
+            # print(self.__label_lbbox)
             self.__sbboxes = tf.placeholder(dtype=tf.float32, name='sbboxes')
+            # print(self.__sbboxes)
             self.__mbboxes = tf.placeholder(dtype=tf.float32, name='mbboxes')
+            # print(self.__mbboxes)
             self.__lbboxes = tf.placeholder(dtype=tf.float32, name='lbboxes')
+            # print(self.__lbboxes)
             self.__training = tf.placeholder(dtype=tf.bool, name='training')
+            # print(self.__training)
 
         with tf.name_scope('learning_rate'):
             self.__global_step = tf.Variable(1.0, dtype=tf.float64, trainable=False, name='global_step')
+            # print(self.__global_step)         # 变量learning_rate/global_step:0
             warmup_steps = tf.constant(self.__warmup_periods * self.__steps_per_period, dtype=tf.float64, name='warmup_steps')
+            # print(warmup_steps)                 # Tensor learning_rate/warmup_steps:0
             train_steps = tf.constant(self.__max_periods * self.__steps_per_period, dtype=tf.float64, name='train_steps')
+            # print(train_steps)                  # Tensor learning_rate/train_steps:0
             # train_steps最大训练部数
             self.__learn_rate = tf.cond(
                 pred=self.__global_step < warmup_steps,
@@ -48,8 +61,9 @@ class Yolo_train(Evaluator):
                                  (1 + tf.cos((self.__global_step - warmup_steps) / (train_steps - warmup_steps) * np.pi))
             )
             global_step_update = tf.assign_add(self.__global_step, 1.0)  # 将后面的值加到前面的变量上去
+            # print(global_step_update)           # Tensor learning_rate/AssignAdd:0
 
-        yolo = YOLOV3(self.__training)
+        yolo = YOLOV3(self.__training)   # 构建yolov3对象
         conv_sbbox, conv_mbbox, conv_lbbox, \
         pred_sbbox, pred_mbbox, pred_lbbox = yolo.build_nework(self.__input_data)
         """
@@ -66,8 +80,9 @@ class Yolo_train(Evaluator):
         """
 
         # 放在这里主要是因为后面使用滑动平均变量时会多出额外的影子变量
-        load_var = tf.global_variables('yolov3')  # tf.global_variables()也可以通过scope的参数来选定域中的变量。
-        restore_dict = self.__get_restore_dict(load_var)
+        if not self.__continus_to_train:
+            load_var = tf.global_variables('yolov3')  # tf.global_variables()也可以通过scope的参数来选定域中的变量。
+            restore_dict = self.__get_restore_dict(load_var)  # 从darknet开始导入参数
 
         self.__loss = yolo.loss(conv_sbbox, conv_mbbox, conv_lbbox,
                                 pred_sbbox, pred_mbbox, pred_lbbox,
@@ -82,7 +97,10 @@ class Yolo_train(Evaluator):
                     self.__train_op = tf.no_op()
 
         with tf.name_scope('load_save'):
-            self.__load = tf.train.Saver(restore_dict)
+            if self.__continus_to_train:
+                self.__load = tf.train.Saver(tf.trainable_variables())
+            else:
+                self.__load = tf.train.Saver(restore_dict)
             self.__save = tf.train.Saver(tf.global_variables(), max_to_keep=self.__max_periods)
 
         with tf.name_scope('summary'):
@@ -95,8 +113,12 @@ class Yolo_train(Evaluator):
 
         self.__sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
         self.__sess.run(tf.global_variables_initializer())
-        logging.info('Restoring weights from:\t %s' % self.__weights_init)
-        self.__load.restore(self.__sess, self.__weights_init)     # 这里才是正式加载权重参数文件
+        if self.__continus_to_train:
+            logging.info('\t' + 'Restoring weights from:\t %s' % self.__checkpoint_file)
+            self.__load.restore(self.__sess, self.__checkpoint_file)  # 这里才是正式加载权重参数文件
+        else:
+            logging.info('\t' + 'Restoring weights from:\t %s' % self.__weights_init)
+            self.__load.restore(self.__sess, self.__weights_init)     # 这里才是正式加载权重参数文件
 
         super(Yolo_train, self).__init__(self.__sess, self.__input_data, self.__training,
                                          pred_sbbox, pred_mbbox, pred_lbbox)
@@ -114,10 +136,10 @@ class Yolo_train(Evaluator):
                     var_shape = var.shape
                     if var_name_mess[0] != 'darknet':
                         continue
-                    print(var_name_mess[0])
+                    # print(var_name_mess[0])
                     org_weights_mess.append([var_name, var_shape])
-        print(org_weights_mess)
-        print("****************************************************************")
+        # print(org_weights_mess)
+        # print("****************************************************************")
         cur_weights_mess = []
         for var in global_variables:
             var_name = var.op.name
@@ -126,13 +148,13 @@ class Yolo_train(Evaluator):
             if var_name_mess[1] != 'darknet53':
                 continue
             cur_weights_mess.append([var_name, var_shape])
-        print(cur_weights_mess)
+        # print(cur_weights_mess)
         org_weights_num = len(org_weights_mess)
         cur_weights_num = len(cur_weights_mess)
-        print(org_weights_num)
-        print(cur_weights_num)
+        # print(org_weights_num)
+        # print(cur_weights_num)
         assert cur_weights_num == org_weights_num
-        logging.info('Number of weights that will load:\t%d' % cur_weights_num)
+        logging.info('\t' + 'Number of weights that will load:\t%d' % cur_weights_num)
 
         cur_to_org_dict = {}
         for index in range(org_weights_num):
@@ -151,7 +173,7 @@ class Yolo_train(Evaluator):
         return restore_dict
 
     def train(self):
-        print_loss_iter = self.__steps_per_period // 100  # 设置损失多久打印一次
+        print_loss_iter = self.__steps_per_period // 50  # 设置损失多久打印一次
         total_train_loss = 0.0
         for period in range(self.__max_periods):
             for batch_image, batch_label_sbbox, batch_label_mbbox, batch_label_lbbox,\
@@ -185,7 +207,7 @@ class Yolo_train(Evaluator):
                 self.__summary_writer.add_summary(summary_val, global_step_val)
                 logging.info('Period:\t%d\tstep:\t%d\ttrain_loss:\t%.4f' % (period, global_step_val, train_loss))
 
-            if period > 0:   # 用于控制经过多少步后开始计算MAP
+            if period > 5:   # 用于控制经过多少步后开始计算MAP
                 APs = self.APs_voc(2007, False, False)
                 for cls in APs:
                     AP_mess = 'AP for %s = %.4f\n' % (cls, APs[cls])
@@ -208,9 +230,9 @@ if __name__ == '__main__':
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
     log_time = time.strftime('%Y-%m-%d-%H-%M-%S',time.localtime(time.time()))
-    logging.basicConfig(filename='log/train/' + log_time + '.log', format='%(filename)s %(asctime)s\t%(message)s',
-                        level=logging.DEBUG, datefmt='%Y-%m-%d %I:%M:%S', filemode='w')
-    logging.info('Using GPU:' + args.gpu)
+    logging.basicConfig(filename='log/train/' + log_time + '.log', format='%(asctime)s %(filename)s[line:%(lineno)d]\t\t%(message)s',
+                        level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S', filemode='w')
+    logging.info('\t' + 'Using GPU:' + args.gpu)
 
     Yolo_train().train()
 
