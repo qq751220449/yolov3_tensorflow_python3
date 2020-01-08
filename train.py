@@ -207,7 +207,7 @@ class Yolo_train(Evaluator):                                    # 继承于Evalu
                 self.__summary_writer.add_summary(summary_val, global_step_val)
                 logging.info('Period:\t%d\tstep:\t%d\ttrain_loss:\t%.4f' % (period, global_step_val, train_loss))
 
-            if period > 5:   # 用于控制经过多少步后开始计算MAP
+            if period > 0:   # 用于控制经过多少步后开始计算MAP
                 APs = self.APs_voc(2007, False, False)
                 for cls in APs:
                     AP_mess = 'AP for %s = %.4f\n' % (cls, APs[cls])

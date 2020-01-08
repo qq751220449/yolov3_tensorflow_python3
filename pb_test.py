@@ -192,4 +192,4 @@ with tf.Graph().as_default():
                           output_node_mbbox_tensor_name, output_node_lbbox_tensor_name, False, False)
         print(response)
         image = tools.draw_bbox(original_image, bboxes, _classes)
-        cv2.imwrite('detect_result.jpg', image)
+        cv2.imwrite('detect_result_pb.jpg', image)

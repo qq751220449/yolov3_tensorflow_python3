@@ -37,6 +37,7 @@ class Data(object):
         self.__num_classes = len(self.__classes)                # 类别数
         self.__gt_per_grid = int(cfg.GT_PER_GRID)               # 每个栅格预测3个Bbox框
         self.__class_to_ind = dict(zip(self.__classes, range(self.__num_classes)))  # 生成类别的索引
+        self.__classes_weights = cfg.CLASSES_WEIGHTS
 
         annotations = self.__load_annotations(dataset_type)
         num_annotations = len(annotations)                      # 待训练的数据集多大---去除没有目标的图片
@@ -94,11 +95,11 @@ class Data(object):
 
             batch_image = np.zeros((self.__batch_size, self.__train_input_size, self.__train_input_size, 3))
             batch_label_sbbox = np.zeros([self.__batch_size, self.__train_output_sizes[0], self.__train_output_sizes[0],
-                                          self.__gt_per_grid, 6 + self.__num_classes])
+                                          self.__gt_per_grid, 7 + self.__num_classes])
             batch_label_mbbox = np.zeros((self.__batch_size, self.__train_output_sizes[1], self.__train_output_sizes[1],
-                                          self.__gt_per_grid, 6 + self.__num_classes))
+                                          self.__gt_per_grid, 7 + self.__num_classes))
             batch_label_lbbox = np.zeros((self.__batch_size, self.__train_output_sizes[2], self.__train_output_sizes[2],
-                                          self.__gt_per_grid, 6 + self.__num_classes))
+                                          self.__gt_per_grid, 7 + self.__num_classes))
             temp_batch_sbboxes = []
             temp_batch_mbboxes = []
             temp_batch_lbboxes = []
@@ -133,6 +134,18 @@ class Data(object):
                     else:
                         image = image_org
                         bboxes = np.concatenate([bboxes_org, np.full((len(bboxes_org), 1), 1.0)], axis=-1)  # 扩展一列,存放权重
+
+                    # 增加权重
+
+                    print(bboxes)
+                    boxes_test = np.full((len(bboxes), 1), 1.0)
+                    for i in range(len(bboxes)):
+                        index_x = bboxes[i, 4]
+                        print(int(index_x))
+                        boxes_test[i] = self.__classes_weights[int(index_x)]
+                    bboxes = np.concatenate([bboxes, boxes_test], axis=-1)
+                    print(bboxes)
+
 
                     label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = self.__create_label(bboxes)
                     # print(len(sbboxes) + len(mbboxes) + len(lbboxes))  # 输出一张图中一共有多少BBox
@@ -211,10 +224,11 @@ class Data(object):
         存储的坐标为(xmin, ymin, xmax, ymax)，大小都是bbox纠正后的原始大小
         """
         label = [np.zeros((self.__train_output_sizes[i], self.__train_output_sizes[i],
-                           self.__gt_per_grid, 6 + self.__num_classes)) for i in range(3)]
+                           self.__gt_per_grid, 7 + self.__num_classes)) for i in range(3)]
         # mixup weight位默认为1.0
         for i in range(3):
             label[i][:, :, :, -1] = 1.0
+            label[i][:, :, :, -2] = 1.0
         bboxes_coor = [[] for _ in range(3)]
         bboxes_count = [np.zeros((self.__train_output_sizes[i], self.__train_output_sizes[i])) for i in range(3)]
 
@@ -223,6 +237,7 @@ class Data(object):
             bbox_coor = bbox[:4]                # 位置
             bbox_class_ind = int(bbox[4])       # 类别
             bbox_mixw = bbox[5]                 # 混合权重
+            bbox_class_weight = bbox[6]
             bbox_xywh = np.concatenate([(bbox_coor[2:] + bbox_coor[:2]) * 0.5,
                                         bbox_coor[2:] - bbox_coor[:2]], axis=-1)   # 将xmin等转换为x,y,w,h(中心坐标)
             bbox_scale = np.sqrt(np.multiply.reduce(bbox_xywh[2:]))  # 面积再开根号
@@ -246,7 +261,7 @@ class Data(object):
             if gt_count < self.__gt_per_grid:
                 if gt_count == 0:
                     gt_count = slice(None)
-                bbox_label = np.concatenate([bbox_coor, [1.0], smooth_onehot, [bbox_mixw]], axis=-1)
+                bbox_label = np.concatenate([bbox_coor, [1.0], smooth_onehot, [bbox_mixw], [bbox_class_weight]], axis=-1)
                 label[match_branch][yind, xind, gt_count, :] = 0
                 label[match_branch][yind, xind, gt_count, :] = bbox_label
                 bboxes_count[match_branch][yind, xind] += 1

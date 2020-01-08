@@ -24,6 +24,7 @@ class Evaluator(object):
         self._iou_threshold = cfg.IOU_THRESHOLD
         self._dataset_path = cfg.DATASET_PATH
         self._project_path = cfg.PROJECT_PATH
+        self.__test_class_weight = cfg.CLASSES_WEIGHTS
 
         self.__sess = sess
         self.__input_data = input_data
@@ -141,7 +142,16 @@ class Evaluator(object):
         annopath = os.path.join(self._dataset_path, 'VOC2007', 'Annotations', '{:s}.xml')
         imagesetfile = os.path.join(self._dataset_path, 'VOC2007', 'ImageSets', 'Main', 'test.txt')
         APs = {}
-        for i, cls in enumerate(cfg.CLASSES):
+        """不计算权重太小的AP"""
+        test_classes = []
+        for i in range(len(self.__test_class_weight)):
+            if self.__test_class_weight[i] < 0.05:
+                continue
+            else:
+                test_classes.append(cfg.CLASSES[i])
+
+        for i, cls in enumerate(test_classes):
+#         for i, cls in enumerate(cfg.CLASSES):
             rec, prec, ap = voc_eval.voc_eval(filename, annopath, imagesetfile, cls, cachedir, iou_thresh, use_07_metric)
             APs[cls] = ap
         if os.path.exists(cachedir):

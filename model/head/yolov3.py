@@ -153,8 +153,9 @@ class YOLOV3(object):
 
             label_coor = label[..., 0:4]        # 真实的BBox框的(xmin, ymin, xmax, ymax)
             respond_bbox = label[..., 4:5]      # 真实的包含物体的置信度 1
-            label_prob = label[..., 5:-1]       # classes的可能性
-            label_mixw = label[..., -1:]        # mixup
+            label_prob = label[..., 5:-2]       # classes的可能性
+            label_mixw = label[..., -2:-1]        # mixup
+            label_class_weight = label[...,-1:]
 
             # 计算GIOU损失
             GIOU = tools.GIOU(pred_coor, label_coor)
@@ -182,7 +183,7 @@ class YOLOV3(object):
             # (3)计算classes损失
             prob_loss = respond_bbox * tf.nn.sigmoid_cross_entropy_with_logits(labels=label_prob, logits=conv_raw_prob)
             loss = tf.concat([GIOU_loss, conf_loss, prob_loss], axis=-1)
-            loss = loss * label_mixw
+            loss = loss * label_mixw * label_class_weight
             loss = tf.reduce_mean(tf.reduce_sum(loss, axis=[1, 2, 3, 4]))
             return loss
 

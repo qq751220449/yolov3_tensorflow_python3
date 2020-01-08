@@ -25,7 +25,7 @@ test score threshold: 0.01<br>
 ## Usage
 1. clone YOLO_v3 repository
     ``` bash
-    git clone https://github.com/qq751220449/yolov3_tensorflow_python3.git
+    git clone https://github.com/qq751220449/yolov3_tensorflow.git
     ```
 2. prepare data<br>
     (1) create your datasets<br>
